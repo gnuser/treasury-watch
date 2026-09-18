@@ -52,7 +52,7 @@ async function load(){
  catch(e){meta.push(['OKX','—','—','—','fail']);}
  const tb=document.getElementById('rows');tb.innerHTML='';
  for(const k of Object.keys(SYM)){
-  const cell=(v,rt)=>{const n=net(v||0,rt,hold);return `<span class="${n>=h?'good':'bad'}"><b>${n.toFixed(2)}%</b></span><span class="meta">rate ${pct(v||0)} · gross ${g(v||0).toFixed(2)}%</span>`;};
+  const cell=(v,rt)=>{const n=net(v||0,rt,hold),drag=rt*365/hold*100;return `<span class="meta">funding ${pct(v||0)}</span><span class="meta">fee −${drag.toFixed(2)}%</span><span class="${n>=h?'good':'bad'}"><b>net ${n.toFixed(2)}%</b></span>`;};
   const b=net(R.bin[k]||0,RT.bin,hold),y=net(R.byb[k]||0,RT.byb,hold),o=net(R.okx[k]||0,RT.okx,hold);
   const best=Math.max(b,y,o);
   tb.innerHTML+=`<tr><td>${k}</td><td>${cell(R.bin[k],RT.bin)}</td><td>${cell(R.byb[k],RT.byb)}</td><td>${cell(R.okx[k],RT.okx)}</td><td class="${best>=h?'good':'bad'}"><b>${best.toFixed(2)}%</b></td></tr>`;
