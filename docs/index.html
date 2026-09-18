@@ -2,65 +2,79 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>treasury-watch — funding MVP</title>
 <style>body{font-family:system-ui;background:#0b0e14;color:#e6e9f0;margin:0;padding:24px}
-table{border-collapse:collapse;width:100%;max-width:1000px}td,th{border:1px solid #2a3140;padding:8px;text-align:right;vertical-align:top}
+table{border-collapse:collapse;width:100%;max-width:1200px}td,th{border:1px solid #2a3140;padding:8px;text-align:right;vertical-align:top}
 th:first-child,td:first-child{text-align:left}.good{color:#4ade80}.bad{color:#f87171}
 .small{color:#8b93a7;font-size:12px}.meta{font-size:11px;color:#8b93a7;display:block}
 input{background:#161b26;color:#fff;border:1px solid #2a3140;padding:4px}h3{margin-top:28px}</style></head>
 <body>
 <h2>Funding-rate MVP <span class="small" id="ts"></span></h2>
-<p class="small">Hurdle <input id="hurdle" type="number" value="5" step="0.5" style="width:60px"> % ·
+<p class="small">All rates normalized to 8h-equivalent. CEX settle 8h; HL/Lighter settle 1h (shown ×8).
+Hurdle <input id="hurdle" type="number" value="5" step="0.5" style="width:60px"> % ·
 Hold <input id="hold" type="number" value="30" step="5" style="width:60px"> days ·
-drag = roundtrip × 365/hold · auto-refresh 60s</p>
-<table><thead><tr><th>Market</th><th>Binance</th><th>Bybit</th><th>OKX</th><th>Best net</th></tr></thead>
+net = gross − roundtrip × 365/hold · auto-refresh 60s</p>
+<table><thead><tr><th>Market</th><th>Binance</th><th>Bybit</th><th>OKX</th><th>Hyperliquid</th><th>Lighter</th><th>Best net</th></tr></thead>
 <tbody id="rows"></tbody></table>
 <p class="small" id="status"></p>
 
-<h3>Fee metadata (VIP0 taker)</h3>
-<table><thead><tr><th>Venue</th><th>Spot taker</th><th>Perp taker</th><th>Roundtrip both legs</th><th>Drag @ hold</th></tr></thead>
+<h3>Fee metadata (VIP0 taker; DEX legs paired with Binance spot)</h3>
+<table><thead><tr><th>Pair</th><th>Spot taker</th><th>Perp taker</th><th>Roundtrip</th><th>Drag @ hold</th></tr></thead>
 <tbody id="fees"></tbody></table>
 
 <h3>Source metadata</h3>
-<table><thead><tr><th>Venue</th><th>Fetched at (UTC)</th><th>Next funding (UTC)</th><th>Latency</th><th>Status</th></tr></thead>
+<table><thead><tr><th>Venue</th><th>Cadence</th><th>Fetched at (UTC)</th><th>Next funding (UTC)</th><th>Latency</th><th>Status</th></tr></thead>
 <tbody id="src"></tbody></table>
 
 <h3>Top funding (Binance, all USDT-M)</h3>
 <table><thead><tr><th>Symbol</th><th>Rate/8h</th><th>Gross APR</th><th>Est. net @ hold</th></tr></thead><tbody id="top"></tbody></table>
-<p class="small">Formula: gross = rate × 3 × 365. Net = gross − roundtrip × 365/hold.
+<p class="small">Formula: gross = 8h-rate × 3 × 365. HL hourly ×8 normalized.
 Snapshot doc: funding-rate-snapshot-2026-09-18.md</p>
 <script>
-const FEE={bin:{s:0.0010,p:0.0005},byb:{s:0.0010,p:0.00055},okx:{s:0.0008,p:0.0005}};
-const RT={bin:(FEE.bin.s+FEE.bin.p)*2,byb:(FEE.byb.s+FEE.byb.p)*2,okx:(FEE.okx.s+FEE.okx.p)*2};
+const FEE={bin:{s:0.0010,p:0.0005},byb:{s:0.0010,p:0.00055},okx:{s:0.0008,p:0.0005},hl:{s:0.0010,p:0.00045},lit:{s:0.0010,p:0.0}};
+const RT={bin:(FEE.bin.s+FEE.bin.p)*2,byb:(FEE.byb.s+FEE.byb.p)*2,okx:(FEE.okx.s+FEE.okx.p)*2,hl:(FEE.hl.s+FEE.hl.p)*2,lit:(FEE.lit.s+FEE.lit.p)*2};
 const SYM={BTC:'BTCUSDT',ETH:'ETHUSDT',SOL:'SOLUSDT'};
 const g=r=>r*3*365*100, net=(r,rt,hold)=>g(r)-rt*365/hold*100;
 const pct=x=>(x*100).toFixed(4)+'%';
-async function J(u){const t0=performance.now();const r=await fetch(u);if(!r.ok)throw 0;const j=await r.json();return{j,ms:Math.round(performance.now()-t0)};}
+async function J(u,opt){const t0=performance.now();const r=await fetch(u,opt);if(!r.ok)throw 0;const j=await r.json();return{j,ms:Math.round(performance.now()-t0)};}
 const fmtT=t=>t?new Date(+t).toUTCString().slice(17,25)+' UTC':'—';
 async function load(){
  const hold=+document.getElementById('hold').value, h=+document.getElementById('hurdle').value;
- const R={bin:{},byb:{},okx:{}}, meta=[];
+ const R={bin:{},byb:{},okx:{},hl:{},lit:{}}, meta=[];
  try{for(const[k,s]of Object.entries(SYM)){const{j,ms}=await J('https://fapi.binance.com/fapi/v1/premiumIndex?symbol='+s);
   R.bin[k]=+j.lastFundingRate;R.bin._t=j.time;R.bin._n=j.nextFundingTime;R.bin._ms=ms;}
-  meta.push(['Binance',R.bin._t,R.bin._n,R.bin._ms,'ok']);}
- catch(e){meta.push(['Binance','—','—','—','fail']);}
+  meta.push(['Binance','8h',R.bin._t,R.bin._n,R.bin._ms,'ok']);}
+ catch(e){meta.push(['Binance','8h','—','—','—','fail']);}
  try{for(const[k,s]of Object.entries(SYM)){const{j,ms}=await J('https://api.bybit.com/v5/market/tickers?category=linear&symbol='+s);
   R.byb[k]=+j.result.list[0].fundingRate;R.byb._n=j.result.list[0].nextFundingTime;R.byb._ms=ms;}
-  R.byb._t=Date.now();meta.push(['Bybit',R.byb._t,R.byb._n,R.byb._ms,'ok']);}
- catch(e){meta.push(['Bybit','—','—','—','fail']);}
+  R.byb._t=Date.now();meta.push(['Bybit','8h',R.byb._t,R.byb._n,R.byb._ms,'ok']);}
+ catch(e){meta.push(['Bybit','8h','—','—','—','fail']);}
  try{for(const k of Object.keys(SYM)){const{j,ms}=await J('https://www.okx.com/api/v5/public/funding-rate?instId='+k+'-USDT-SWAP');
   R.okx[k]=+j.data[0].fundingRate;R.okx._t=+j.data[0].ts;R.okx._n=+j.data[0].nextFundingTime;R.okx._ms=ms;}
-  meta.push(['OKX',R.okx._t,R.okx._n,R.okx._ms,'ok']);}
- catch(e){meta.push(['OKX','—','—','—','fail']);}
+  meta.push(['OKX','8h',R.okx._t,R.okx._n,R.okx._ms,'ok']);}
+ catch(e){meta.push(['OKX','8h','—','—','—','fail']);}
+ try{const{j,ms}=await J('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'metaAndAssetCtxs'})});
+  const names=j[0].universe.map(u=>u.name), ctxs=j[1];
+  for(const k of Object.keys(SYM)){const i=names.indexOf(k);R.hl[k]=i>=0?+ctxs[i].funding*8:0;}
+  R.hl._t=Date.now();R.hl._ms=ms;meta.push(['Hyperliquid','1h',R.hl._t,'hourly',R.hl._ms,'ok']);}
+ catch(e){meta.push(['Hyperliquid','1h','—','—','—','fail']);}
+ try{const{j,ms}=await J('https://mainnet.zklighter.elliot.ai/api/v1/funding-rates');
+  for(const k of Object.keys(SYM)){const e=j.funding_rates.find(x=>x.symbol===k&&x.exchange==='lighter');R.lit[k]=e?+e.rate:0;}
+  R.lit._t=Date.now();R.lit._ms=ms;meta.push(['Lighter','1h',R.lit._t,'hourly',R.lit._ms,'ok']);}
+ catch(e){meta.push(['Lighter','1h','—','—','—','fail (browser CORS?)']);}
  const tb=document.getElementById('rows');tb.innerHTML='';
+ const cols=[['bin','Binance'],['byb','Bybit'],['okx','OKX'],['hl','Hyperliquid'],['lit','Lighter']];
  for(const k of Object.keys(SYM)){
-  const cell=(v,rt)=>{const n=net(v||0,rt,hold),drag=rt*365/hold*100;return `<span class="meta">funding ${pct(v||0)}</span><span class="meta">fee −${drag.toFixed(2)}%</span><span class="${n>=h?'good':'bad'}"><b>net ${n.toFixed(2)}%</b></span>`;};
-  const b=net(R.bin[k]||0,RT.bin,hold),y=net(R.byb[k]||0,RT.byb,hold),o=net(R.okx[k]||0,RT.okx,hold);
-  const best=Math.max(b,y,o);
-  tb.innerHTML+=`<tr><td>${k}</td><td>${cell(R.bin[k],RT.bin)}</td><td>${cell(R.byb[k],RT.byb)}</td><td>${cell(R.okx[k],RT.okx)}</td><td class="${best>=h?'good':'bad'}"><b>${best.toFixed(2)}%</b></td></tr>`;
+  const cell=(v,rt)=>{const n=net(v||0,rt,hold),drag=rt*365/hold*100;
+   return `<span class="meta">funding ${pct(v||0)}</span><span class="meta">fee −${drag.toFixed(2)}%</span><span class="${n>=h?'good':'bad'}"><b>net ${n.toFixed(2)}%</b></span>`;};
+  let html=`<tr><td>${k}</td>`, best=-1e9;
+  for(const[c]of cols){const n=net(R[c][k]||0,RT[c],hold);if(n>best)best=n;html+=`<td>${cell(R[c][k],RT[c])}</td>`;}
+  html+=`<td class="${best>=h?'good':'bad'}"><b>${best.toFixed(2)}%</b></td></tr>`;
+  tb.innerHTML+=html;
  }
- const nm={Binance:'bin',Bybit:'byb',OKX:'okx'};
- document.getElementById('fees').innerHTML=Object.keys(nm).map(v=>{const k=nm[v],f=v==='Binance'?FEE.bin:v==='Bybit'?FEE.byb:FEE.okx;
-  return `<tr><td>${v}</td><td>${(f.s*100).toFixed(2)}%</td><td>${(f.p*100).toFixed(3)}%</td><td>${(RT[k]*100).toFixed(2)}%</td><td>${(RT[k]*365/hold*100).toFixed(2)}%</td></tr>`;}).join('');
- document.getElementById('src').innerHTML=meta.map(m=>`<tr><td>${m[0]}</td><td>${m[1]==='—'?'—':new Date(+m[1]).toUTCString()}</td><td>${fmtT(m[2])}</td><td>${m[3]}${m[3]==='—'?'':' ms'}</td><td class="${m[4]==='ok'?'good':'bad'}">${m[4]}</td></tr>`).join('');
+ const nm={Binance:'bin',Bybit:'byb',OKX:'okx',Hyperliquid:'hl',Lighter:'lit'};
+ const fs={bin:FEE.bin,byb:FEE.byb,okx:FEE.okx,hl:FEE.hl,lit:FEE.lit};
+ document.getElementById('fees').innerHTML=Object.keys(nm).map(v=>{const k=nm[v],f=fs[k];
+  return `<tr><td>${v}${k==='hl'||k==='lit'?' (perp) + Binance spot':''}</td><td>${(f.s*100).toFixed(2)}%</td><td>${(f.p*100).toFixed(3)}%</td><td>${(RT[k]*100).toFixed(2)}%</td><td>${(RT[k]*365/hold*100).toFixed(2)}%</td></tr>`;}).join('');
+ document.getElementById('src').innerHTML=meta.map(m=>`<tr><td>${m[0]}</td><td>${m[1]}</td><td>${m[2]==='—'||m[2]==='hourly'?m[2]:new Date(+m[2]).toUTCString()}</td><td>${m[3]==='—'||m[3]==='hourly'?m[3]:fmtT(m[3])}</td><td>${m[4]}${m[4]==='—'?'':' ms'}</td><td class="${m[5]==='ok'?'good':'bad'}">${m[5]}</td></tr>`).join('');
  document.getElementById('status').textContent='hold '+hold+'d · hurdle '+h+'%';
  try{const{j}=await J('https://fapi.binance.com/fapi/v1/premiumIndex');
   const t=j.filter(x=>x.symbol.endsWith('USDT')).map(x=>({s:x.symbol,r:+x.lastFundingRate}))
