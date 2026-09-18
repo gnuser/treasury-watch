@@ -1,0 +1,41 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>treasury-watch — funding MVP</title>
+<style>body{font-family:system-ui;background:#0b0e14;color:#e6e9f0;margin:0;padding:24px}
+table{border-collapse:collapse;width:100%;max-width:900px}td,th{border:1px solid #2a3140;padding:8px;text-align:right}
+th:first-child,td:first-child{text-align:left}.good{color:#4ade80}.bad{color:#f87171}
+.small{color:#8b93a7;font-size:12px}input{background:#161b26;color:#fff;border:1px solid #2a3140;padding:4px}</style></head>
+<body>
+<h2>Funding-rate MVP <span class="small" id="ts"></span></h2>
+<p class="small">Sources: Binance / Bybit / OKX public APIs, 8h period.
+Net30 ≈ gross − roundtrip×12.17. Hurdle: <input id="hurdle" type="number" value="5" step="0.5" style="width:60px"> %</p>
+<table><thead><tr><th>Market</th><th>Binance net</th><th>Bybit net</th><th>OKX net</th><th>Best</th></tr></thead>
+<tbody id="rows"></tbody></table>
+<p class="small" id="status"></p>
+<h3>Top funding (Binance, all USDT-M)</h3>
+<table><thead><tr><th>Symbol</th><th>Rate/8h</th><th>Gross APR</th></tr></thead><tbody id="top"></tbody></table>
+<script>
+const RT={bin:0.0030,byb:0.0031,okx:0.0026}, SYM={BTC:'BTCUSDT',ETH:'ETHUSDT',SOL:'SOLUSDT'};
+const g=r=>r*3*365*100, net=(r,rt)=>(g(r)-rt*12.17*100);
+async function J(u){const r=await fetch(u);if(!r.ok)throw 0;return r.json();}
+async function load(){
+ const out={},st=[];
+ try{for(const[k,s]of Object.entries(SYM)){const d=await J('https://fapi.binance.com/fapi/v1/premiumIndex?symbol='+s);out['bin'+k]=+d.lastFundingRate;}}catch(e){st.push('binance fail');}
+ try{for(const[k,s]of Object.entries(SYM)){const d=await J('https://api.bybit.com/v5/market/tickers?category=linear&symbol='+s);out['byb'+k]=+d.result.list[0].fundingRate;}}catch(e){st.push('bybit fail');}
+ try{for(const k of Object.keys(SYM)){const id=k+'-USDT-SWAP';const d=await J('https://www.okx.com/api/v5/public/funding-rate?instId='+id);out['okx'+k]=+d.data[0].fundingRate;}}catch(e){st.push('okx fail');}
+ const h=+document.getElementById('hurdle').value, tb=document.getElementById('rows');tb.innerHTML='';
+ for(const k of Object.keys(SYM)){
+  const b=net(out['bin'+k]||0,RT.bin),y=net(out['byb'+k]||0,RT.byb),o=net(out['okx'+k]||0,RT.okx);
+  const best=Math.max(b,y,o),cls=v=>v>=h?'good':'bad';
+  tb.innerHTML+=`<tr><td>${k}</td><td class="${cls(b)}">${b.toFixed(2)}%</td><td class="${cls(y)}">${y.toFixed(2)}%</td><td class="${cls(o)}">${o.toFixed(2)}%</td><td class="${cls(best)}">${best.toFixed(2)}%</td></tr>`;
+ }
+ try{const all=await J('https://fapi.binance.com/fapi/v1/premiumIndex');
+  const t=all.filter(x=>x.symbol.endsWith('USDT')).map(x=>({s:x.symbol,r:+x.lastFundingRate}))
+   .sort((a,b)=>b.r-a.r).slice(0,5);
+  document.getElementById('top').innerHTML=t.map(x=>`<tr><td>${x.s}</td><td>${(x.r*100).toFixed(4)}%</td><td>${g(x.r).toFixed(1)}%</td></tr>`).join('');
+ }catch(e){st.push('top fail');}
+ document.getElementById('ts').textContent=new Date().toUTCString();
+ document.getElementById('status').textContent=st.length?('WARN: '+st.join(', ')):'all sources ok · auto-refresh 60s';
+}
+document.getElementById('hurdle').onchange=load;load();setInterval(load,60000);
+</script></body></html>
