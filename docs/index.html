@@ -2,40 +2,73 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>treasury-watch — funding MVP</title>
 <style>body{font-family:system-ui;background:#0b0e14;color:#e6e9f0;margin:0;padding:24px}
-table{border-collapse:collapse;width:100%;max-width:900px}td,th{border:1px solid #2a3140;padding:8px;text-align:right}
+table{border-collapse:collapse;width:100%;max-width:1000px}td,th{border:1px solid #2a3140;padding:8px;text-align:right;vertical-align:top}
 th:first-child,td:first-child{text-align:left}.good{color:#4ade80}.bad{color:#f87171}
-.small{color:#8b93a7;font-size:12px}input{background:#161b26;color:#fff;border:1px solid #2a3140;padding:4px}</style></head>
+.small{color:#8b93a7;font-size:12px}.meta{font-size:11px;color:#8b93a7;display:block}
+input{background:#161b26;color:#fff;border:1px solid #2a3140;padding:4px}h3{margin-top:28px}</style></head>
 <body>
 <h2>Funding-rate MVP <span class="small" id="ts"></span></h2>
-<p class="small">Sources: Binance / Bybit / OKX public APIs, 8h period.
-Net30 ≈ gross − roundtrip×12.17. Hurdle: <input id="hurdle" type="number" value="5" step="0.5" style="width:60px"> %</p>
-<table><thead><tr><th>Market</th><th>Binance net</th><th>Bybit net</th><th>OKX net</th><th>Best</th></tr></thead>
+<p class="small">Hurdle <input id="hurdle" type="number" value="5" step="0.5" style="width:60px"> % ·
+Hold <input id="hold" type="number" value="30" step="5" style="width:60px"> days ·
+drag = roundtrip × 365/hold · auto-refresh 60s</p>
+<table><thead><tr><th>Market</th><th>Binance</th><th>Bybit</th><th>OKX</th><th>Best net</th></tr></thead>
 <tbody id="rows"></tbody></table>
 <p class="small" id="status"></p>
+
+<h3>Fee metadata (VIP0 taker)</h3>
+<table><thead><tr><th>Venue</th><th>Spot taker</th><th>Perp taker</th><th>Roundtrip both legs</th><th>Drag @ hold</th></tr></thead>
+<tbody id="fees"></tbody></table>
+
+<h3>Source metadata</h3>
+<table><thead><tr><th>Venue</th><th>Fetched at (UTC)</th><th>Next funding (UTC)</th><th>Latency</th><th>Status</th></tr></thead>
+<tbody id="src"></tbody></table>
+
 <h3>Top funding (Binance, all USDT-M)</h3>
-<table><thead><tr><th>Symbol</th><th>Rate/8h</th><th>Gross APR</th></tr></thead><tbody id="top"></tbody></table>
+<table><thead><tr><th>Symbol</th><th>Rate/8h</th><th>Gross APR</th><th>Est. net @ hold</th></tr></thead><tbody id="top"></tbody></table>
+<p class="small">Formula: gross = rate × 3 × 365. Net = gross − roundtrip × 365/hold.
+Snapshot doc: funding-rate-snapshot-2026-09-18.md</p>
 <script>
-const RT={bin:0.0030,byb:0.0031,okx:0.0026}, SYM={BTC:'BTCUSDT',ETH:'ETHUSDT',SOL:'SOLUSDT'};
-const g=r=>r*3*365*100, net=(r,rt)=>(g(r)-rt*12.17*100);
-async function J(u){const r=await fetch(u);if(!r.ok)throw 0;return r.json();}
+const FEE={bin:{s:0.0010,p:0.0005},byb:{s:0.0010,p:0.00055},okx:{s:0.0008,p:0.0005}};
+const RT={bin:(FEE.bin.s+FEE.bin.p)*2,byb:(FEE.byb.s+FEE.byb.p)*2,okx:(FEE.okx.s+FEE.okx.p)*2};
+const SYM={BTC:'BTCUSDT',ETH:'ETHUSDT',SOL:'SOLUSDT'};
+const g=r=>r*3*365*100, net=(r,rt,hold)=>g(r)-rt*365/hold*100;
+const pct=x=>(x*100).toFixed(4)+'%';
+async function J(u){const t0=performance.now();const r=await fetch(u);if(!r.ok)throw 0;const j=await r.json();return{j,ms:Math.round(performance.now()-t0)};}
+const fmtT=t=>t?new Date(+t).toUTCString().slice(17,25)+' UTC':'—';
 async function load(){
- const out={},st=[];
- try{for(const[k,s]of Object.entries(SYM)){const d=await J('https://fapi.binance.com/fapi/v1/premiumIndex?symbol='+s);out['bin'+k]=+d.lastFundingRate;}}catch(e){st.push('binance fail');}
- try{for(const[k,s]of Object.entries(SYM)){const d=await J('https://api.bybit.com/v5/market/tickers?category=linear&symbol='+s);out['byb'+k]=+d.result.list[0].fundingRate;}}catch(e){st.push('bybit fail');}
- try{for(const k of Object.keys(SYM)){const id=k+'-USDT-SWAP';const d=await J('https://www.okx.com/api/v5/public/funding-rate?instId='+id);out['okx'+k]=+d.data[0].fundingRate;}}catch(e){st.push('okx fail');}
- const h=+document.getElementById('hurdle').value, tb=document.getElementById('rows');tb.innerHTML='';
+ const hold=+document.getElementById('hold').value, h=+document.getElementById('hurdle').value;
+ const R={bin:{},byb:{},okx:{}}, meta=[];
+ try{for(const[k,s]of Object.entries(SYM)){const{j,ms}=await J('https://fapi.binance.com/fapi/v1/premiumIndex?symbol='+s);
+  R.bin[k]=+j.lastFundingRate;R.bin._t=j.time;R.bin._n=j.nextFundingTime;R.bin._ms=ms;}
+  meta.push(['Binance',R.bin._t,R.bin._n,R.bin._ms,'ok']);}
+ catch(e){meta.push(['Binance','—','—','—','fail']);}
+ try{for(const[k,s]of Object.entries(SYM)){const{j,ms}=await J('https://api.bybit.com/v5/market/tickers?category=linear&symbol='+s);
+  R.byb[k]=+j.result.list[0].fundingRate;R.byb._n=j.result.list[0].nextFundingTime;R.byb._ms=ms;}
+  R.byb._t=Date.now();meta.push(['Bybit',R.byb._t,R.byb._n,R.byb._ms,'ok']);}
+ catch(e){meta.push(['Bybit','—','—','—','fail']);}
+ try{for(const k of Object.keys(SYM)){const{j,ms}=await J('https://www.okx.com/api/v5/public/funding-rate?instId='+k+'-USDT-SWAP');
+  R.okx[k]=+j.data[0].fundingRate;R.okx._t=+j.data[0].ts;R.okx._n=+j.data[0].nextFundingTime;R.okx._ms=ms;}
+  meta.push(['OKX',R.okx._t,R.okx._n,R.okx._ms,'ok']);}
+ catch(e){meta.push(['OKX','—','—','—','fail']);}
+ const tb=document.getElementById('rows');tb.innerHTML='';
  for(const k of Object.keys(SYM)){
-  const b=net(out['bin'+k]||0,RT.bin),y=net(out['byb'+k]||0,RT.byb),o=net(out['okx'+k]||0,RT.okx);
-  const best=Math.max(b,y,o),cls=v=>v>=h?'good':'bad';
-  tb.innerHTML+=`<tr><td>${k}</td><td class="${cls(b)}">${b.toFixed(2)}%</td><td class="${cls(y)}">${y.toFixed(2)}%</td><td class="${cls(o)}">${o.toFixed(2)}%</td><td class="${cls(best)}">${best.toFixed(2)}%</td></tr>`;
+  const cell=(v,rt)=>{const n=net(v||0,rt,hold);return `<span class="${n>=h?'good':'bad'}"><b>${n.toFixed(2)}%</b></span><span class="meta">rate ${pct(v||0)} · gross ${g(v||0).toFixed(2)}%</span>`;};
+  const b=net(R.bin[k]||0,RT.bin,hold),y=net(R.byb[k]||0,RT.byb,hold),o=net(R.okx[k]||0,RT.okx,hold);
+  const best=Math.max(b,y,o);
+  tb.innerHTML+=`<tr><td>${k}</td><td>${cell(R.bin[k],RT.bin)}</td><td>${cell(R.byb[k],RT.byb)}</td><td>${cell(R.okx[k],RT.okx)}</td><td class="${best>=h?'good':'bad'}"><b>${best.toFixed(2)}%</b></td></tr>`;
  }
- try{const all=await J('https://fapi.binance.com/fapi/v1/premiumIndex');
-  const t=all.filter(x=>x.symbol.endsWith('USDT')).map(x=>({s:x.symbol,r:+x.lastFundingRate}))
+ const nm={Binance:'bin',Bybit:'byb',OKX:'okx'};
+ document.getElementById('fees').innerHTML=Object.keys(nm).map(v=>{const k=nm[v],f=v==='Binance'?FEE.bin:v==='Bybit'?FEE.byb:FEE.okx;
+  return `<tr><td>${v}</td><td>${(f.s*100).toFixed(2)}%</td><td>${(f.p*100).toFixed(3)}%</td><td>${(RT[k]*100).toFixed(2)}%</td><td>${(RT[k]*365/hold*100).toFixed(2)}%</td></tr>`;}).join('');
+ document.getElementById('src').innerHTML=meta.map(m=>`<tr><td>${m[0]}</td><td>${m[1]==='—'?'—':new Date(+m[1]).toUTCString()}</td><td>${fmtT(m[2])}</td><td>${m[3]}${m[3]==='—'?'':' ms'}</td><td class="${m[4]==='ok'?'good':'bad'}">${m[4]}</td></tr>`).join('');
+ document.getElementById('status').textContent='hold '+hold+'d · hurdle '+h+'%';
+ try{const{j}=await J('https://fapi.binance.com/fapi/v1/premiumIndex');
+  const t=j.filter(x=>x.symbol.endsWith('USDT')).map(x=>({s:x.symbol,r:+x.lastFundingRate}))
    .sort((a,b)=>b.r-a.r).slice(0,5);
-  document.getElementById('top').innerHTML=t.map(x=>`<tr><td>${x.s}</td><td>${(x.r*100).toFixed(4)}%</td><td>${g(x.r).toFixed(1)}%</td></tr>`).join('');
- }catch(e){st.push('top fail');}
+  document.getElementById('top').innerHTML=t.map(x=>`<tr><td>${x.s}</td><td>${pct(x.r)}</td><td>${g(x.r).toFixed(1)}%</td><td>${net(x.r,RT.bin,hold).toFixed(1)}%</td></tr>`).join('');
+ }catch(e){}
  document.getElementById('ts').textContent=new Date().toUTCString();
- document.getElementById('status').textContent=st.length?('WARN: '+st.join(', ')):'all sources ok · auto-refresh 60s';
 }
-document.getElementById('hurdle').onchange=load;load();setInterval(load,60000);
+document.getElementById('hurdle').onchange=load;document.getElementById('hold').onchange=load;
+load();setInterval(load,60000);
 </script></body></html>
