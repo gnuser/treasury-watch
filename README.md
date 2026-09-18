@@ -8,7 +8,7 @@ Read-only. No keys, no trading, no leverage.
 - One-command reports for DAO treasuries (holdings, yield breakdown, exposure)
 
 ## Live example
-- Dashboard: `dashboard/index.html` (also served via GitHub Pages)
+- Dashboard: `docs/index.html` (served via GitHub Pages from `/docs`)
 - Real pull: `docs/funding-rate-snapshot-2026-09-18.md` — Binance/Bybit/OKX
   public APIs, majors net ~4–8% after taker fees
 
