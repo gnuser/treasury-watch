@@ -11,7 +11,8 @@ input{background:#161b26;color:#fff;border:1px solid #2a3140;padding:4px}h3{marg
 <p class="small">All rates normalized to 8h-equivalent. CEX settle 8h; HL/Lighter settle 1h (shown ×8).
 Hurdle <input id="hurdle" type="number" value="5" step="0.5" style="width:60px"> % ·
 Hold <input id="hold" type="number" value="30" step="5" style="width:60px"> days ·
-net = gross − roundtrip × 365/hold · auto-refresh 60s</p>
+Capital <input id="cap" type="number" value="200000" step="10000" style="width:90px"> USDT ·
+net = gross − roundtrip × 365/hold · revenue assumes all-in, unified margin /1.25 buffer · auto-refresh 60s</p>
 <table><thead><tr><th>Market</th><th>Binance</th><th>Bybit</th><th>OKX</th><th>Hyperliquid</th><th>Lighter</th><th>Best net</th></tr></thead>
 <tbody id="rows"></tbody></table>
 <p class="small" id="status"></p>
@@ -37,7 +38,7 @@ const pct=x=>(x*100).toFixed(4)+'%';
 async function J(u,opt){const t0=performance.now();const r=await fetch(u,opt);if(!r.ok)throw 0;const j=await r.json();return{j,ms:Math.round(performance.now()-t0)};}
 const fmtT=t=>t?new Date(+t).toUTCString().slice(17,25)+' UTC':'—';
 async function load(){
- const hold=+document.getElementById('hold').value, h=+document.getElementById('hurdle').value;
+ const hold=+document.getElementById('hold').value, h=+document.getElementById('hurdle').value, cap=+document.getElementById('cap').value;
  const R={bin:{},byb:{},okx:{},hl:{},lit:{}}, meta=[];
  try{for(const[k,s]of Object.entries(SYM)){const{j,ms}=await J('https://fapi.binance.com/fapi/v1/premiumIndex?symbol='+s);
   R.bin[k]=+j.lastFundingRate;R.bin._t=j.time;R.bin._n=j.nextFundingTime;R.bin._ms=ms;}
@@ -64,7 +65,8 @@ async function load(){
  const cols=[['bin','Binance'],['byb','Bybit'],['okx','OKX'],['hl','Hyperliquid'],['lit','Lighter']];
  for(const k of Object.keys(SYM)){
   const cell=(v,rt)=>{const n=net(v||0,rt,hold),drag=rt*365/hold*100;
-   return `<span class="meta">funding ${pct(v||0)}</span><span class="meta">fee −${drag.toFixed(2)}%</span><span class="${n>=h?'good':'bad'}"><b>net ${n.toFixed(2)}%</b></span>`;};
+   const notion=cap/1.25, d=notion*(v||0)*3-notion*rt/hold, fmt=x=>'$'+x.toLocaleString('en-US',{maximumFractionDigits:1});
+   return `<span class="meta">funding ${pct(v||0)}</span><span class="meta">fee −${drag.toFixed(2)}%</span><span class="${n>=h?'good':'bad'}"><b>net ${n.toFixed(2)}%</b></span><span class="meta">${fmt(d)}/day · ${fmt(d*7)}/7d</span>`;};
   let html=`<tr><td>${k}</td>`, best=-1e9;
   for(const[c]of cols){const n=net(R[c][k]||0,RT[c],hold);if(n>best)best=n;html+=`<td>${cell(R[c][k],RT[c])}</td>`;}
   html+=`<td class="${best>=h?'good':'bad'}"><b>${best.toFixed(2)}%</b></td></tr>`;
@@ -83,6 +85,6 @@ async function load(){
  }catch(e){}
  document.getElementById('ts').textContent=new Date().toUTCString();
 }
-document.getElementById('hurdle').onchange=load;document.getElementById('hold').onchange=load;
+document.getElementById('hurdle').onchange=load;document.getElementById('hold').onchange=load;document.getElementById('cap').onchange=load;
 load();setInterval(load,60000);
 </script></body></html>
